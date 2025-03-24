@@ -1,49 +1,65 @@
 import google.generativeai as genai
+import re
 
 class GeminiService:
-    def __init__(self):  
-        API_KEY = "AIzaSyDcGXJBf0drJ9vOEq7KL4qmCyz7AXvnEsQ"  # 🔴 Replace with env variable
+    def __init__(self):
+        # Initialize the Gemini model
+        API_KEY = "MY_API_KEY"  # Replace with your actual Gemini API key
         genai.configure(api_key=API_KEY)
-        self.model = genai.GenerativeModel('gemini-2.0-flash')
-        self.history = []  # Stores conversation
-        self.score = 0  # ✅ Tracks user score
-        self.current_question = None  # ✅ Stores active question
-        self.bot_answer = None  # ✅ Stores Gemini's answer
-        self.user_answer = None  # ✅ Stores user's answer
+        self.model = genai.GenerativeModel('gemini-2.0-flash')  # Use 'gemini-pro' or the appropriate model name
 
-    # ✅ Step 1: Receive a finance question
+        # Initialize conversation history and other attributes
+        self.history = []  # Stores conversation history
+        self.score = 0     # Tracks user score
+        self.current_question = None  # Stores active question
+        self.bot_answer = None  # Stores Gemini's answer
+        self.user_answer = None  # Stores user's answer
+
     def receive_question(self, question):
+        if not question or not isinstance(question, str):
+            raise ValueError("Invalid question provided")
+        
+        # Set the current question
         self.current_question = question
-        self.user_answer = None  # Reset previous answer
-        self.bot_answer = None  # Reset bot's answer
+        
+        # Add the question to the conversation history
+        self.history.append({"role": "user", "text": question})
+        
         return "Question received."
 
-    # ✅ Step 2: Generate Gemini’s answer
     def generate_answer(self):
         if not self.current_question:
-            return "No question received. Please provide a question first."
+            raise ValueError("No question received. Please provide a question first.")
         
-        response = self.model.generate_content(f"Answer this finance question: {self.current_question}")
-        self.bot_answer = response.text.strip()  # Store Gemini's answer
+        # Generate a response using the Gemini model
+        prompt = f"Answer this finance question: {self.current_question}"
+        response = self.model.generate_content(prompt)
+        raw_answer = response.text  # Get the raw answer
+        self.bot_answer = self._clean_text_format(raw_answer)  # Clean and store the bot's answer
+        self.history.append({"role": "bot", "text": self.bot_answer})  # Add bot's answer to history
         return self.bot_answer
 
-    # ✅ Step 3: Receive user’s answer
-    def submit_user_answer(self, user_answer):
-        if not self.current_question:
-            return "No active question. Please provide a question first."
+    def submit_user_answer(self, user_input):
+        if not user_input or not isinstance(user_input, str):
+            raise ValueError("Invalid user input")
         
-        self.user_answer = user_answer.strip()  # Store user's answer
-        return "Your answer has been recorded. Ask for evaluation."
+        # Store the user's answer
+        self.user_answer = user_input.strip()
+        
+        # Add the user's answer to the conversation history
+        self.history.append({"role": "user", "text": self.user_answer})
+        
+        return "Your input has been recorded. Ask for evaluation or continue the conversation."
 
-    # ✅ Step 4: Evaluate user’s answer (Grades from 1 to 10)
     def evaluate_answer(self):
         if not self.current_question or not self.user_answer:
-            return "No answer to evaluate. Please provide an answer first."
-
+            raise ValueError("No question or answer provided for evaluation.")
+        
+        # Ensure we have Gemini's answer
         if not self.bot_answer:
-            self.generate_answer()  # Ensure we have Gemini's answer
-
-        # ✅ Ask Gemini to grade the user's answer
+            self.generate_answer()
+        
+        # Evaluate the user's answer
         prompt = f"""
         Compare these two answers:
         1️⃣ Bot's Answer: "{self.bot_answer}"
@@ -60,22 +76,73 @@ class GeminiService:
         """
         response = self.model.generate_content(prompt)
         
+        # Extract the score from the response
         try:
-            grade = int(response.text.strip())  # Extract Gemini’s score
-        except ValueError:
-            grade = 0  # Default to 0 if Gemini's response is not valid
+            # Use regex to find the first integer in the response
+            match = re.search(r'\b\d+\b', response.text)
+            if match:
+                grade = int(match.group())
+            else:
+                grade = 0  # Default to 0 if no integer is found
+        except Exception as e:
+            print(f"Error parsing response: {e}")
+            grade = 0  # Default to 0 in case of any error
         
         self.score += grade  # Add to total score
         
-        result = f"Your answer was graded {grade}/10.\nGemini's answer: {self.bot_answer}"
+        result = f"Your answer has been evaluated. Score: {grade}/10.\nGemini's answer: {self.bot_answer}"
+        return result
+
+    def continue_conversation(self, user_input):
+        if not user_input or not isinstance(user_input, str):
+            raise ValueError("Invalid user input")
         
-        # ✅ Reset question & answer tracking
+        # Add the user's follow-up to the conversation history
+        self.history.append({"role": "user", "text": user_input})
+        
+        # Generate a contextual response using the entire conversation history
+        prompt = "Continue the conversation based on the following context:\n"
+        for msg in self.history:
+            prompt += f"{msg['role']}: {msg['text']}\n"
+        
+        response = self.model.generate_content(prompt)
+        raw_response = response.text.strip()
+        bot_response = self._clean_text_format(raw_response)  # Clean the response
+        self.history.append({"role": "bot", "text": bot_response})  # Add bot's response to history
+        return bot_response
+
+    def reset_conversation(self):
+        self.history = []
         self.current_question = None
         self.user_answer = None
         self.bot_answer = None
-
-        return result
-
-    # ✅ Get user's current score
-    def get_score(self):
-        return f"Your total score is: {self.score}"
+        return "Conversation reset."
+    
+    def _clean_text_format(self, text):
+        """
+        Clean the formatting from the text while preserving proper spacing.
+        Remove markdown formatting but maintain paragraph breaks and list structure.
+        """
+        # Remove markdown formatting for bold and italic (asterisks)
+        text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # Remove bold (**text**)
+        text = re.sub(r'\*(.*?)\*', r'\1', text)      # Remove italic (*text*)
+        
+        # Handle bullet points with proper spacing
+        text = re.sub(r'^\s*[\*\-\+]\s+(.*?)$', r'• \1\n', text, flags=re.MULTILINE)
+        
+        # Remove backticks for code formatting
+        text = re.sub(r'`(.*?)`', r'\1', text)
+        
+        # Handle numbered lists with proper spacing
+        text = re.sub(r'^\s*(\d+)\.[\s]+(.*?)$', r'\1. \2\n', text, flags=re.MULTILINE)
+        
+        # Ensure proper paragraph spacing (replace single newlines with double newlines)
+        text = re.sub(r'([^\n])\n([^\n])', r'\1\n\n\2', text)
+        
+        # Remove excessive blank lines (more than 2 consecutive newlines)
+        text = re.sub(r'\n{3,}', r'\n\n', text)
+        
+        # Ensure the text ends with a single newline
+        text = text.rstrip('\n') + '\n'
+        
+        return text
