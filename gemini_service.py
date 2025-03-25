@@ -4,7 +4,7 @@ import re
 class GeminiService:
     def __init__(self):
         # Initialize the Gemini model
-        API_KEY = "MY_API_KEY"  # Replace with your actual Gemini API key
+        API_KEY = "API_KEY"  # Replace with your actual Gemini API key
         genai.configure(api_key=API_KEY)
         self.model = genai.GenerativeModel('gemini-2.0-flash')  # Use 'gemini-pro' or the appropriate model name
 
